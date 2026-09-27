@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "lab",
+  "homepage": "https://www.danolekh.com/lab",
+  "items": [
+    {
+      "name": "price-evidence",
+      "type": "registry:component",
+      "title": "Price evidence",
+      "description": "A suggested price with the sales behind it: every similar sale is a dot, stacked by price, with the range over the thickest part. The sales drop in on first view; point or arrow through them to see each one.",
+      "files": [
+        {
+          "path": "items/price-evidence/price-evidence.tsx",
+          "type": "registry:component"
+        }
+      ]
+    }
+  ]
+}

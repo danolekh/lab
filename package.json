@@ -1,0 +1,28 @@
+{
+  "name": "lab",
+  "private": true,
+  "type": "module",
+  "description": "Small interface things, one folder each, installable with the shadcn CLI.",
+  "scripts": {
+    "dev": "vite",
+    "registry:build": "shadcn build --output public/r",
+    "check": "tsc --noEmit",
+    "build": "pnpm registry:build && tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@fontsource-variable/rubik": "^5.2.8",
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "shadcn": "4.21.0",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  },
+  "packageManager": "pnpm@10.28.0"
+}
