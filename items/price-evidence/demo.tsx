@@ -1,6 +1,8 @@
 import "@fontsource-variable/rubik";
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Shader, shaderBackground } from "@danolekh/cardstock/shader";
+import { Glass } from "./glass";
 import { PriceEvidence, type Sale } from "./price-evidence";
 
 /* The concept, in Minimist's style: a charity shop drops in a photo of a donated item and gets the
@@ -56,6 +58,26 @@ export const ITEMS: Item[] = [
 const RATIO = 0.42;
 const READING_MS = 1200;
 
+/** Behind the glass look: soft spots of iOS system colours drifting slowly (cardstock's mesh). */
+const BACKDROP = shaderBackground("mesh", {
+  color: "#3b2f9f",
+  speed: 0.3,
+  params: {
+    colors: ["#0A84FF", "#5E5CE6", "#BF5AF2", "#FF375F", "#FF9F0A"],
+    distortion: 0.85,
+    swirl: 0.5,
+    grain: 0.04,
+  },
+});
+
+/** The listing's colours: shadcn tokens for the part, set per look. */
+const TOKENS = {
+  minimist:
+    "[--background:#fff] [--border:#E4E4E7] [--foreground:#141413] [--muted-foreground:#71717A] [--muted:#F4F4F5] [--pe-accent:#141413] [--pe-axis:#9a9aa3] [--pe-band:rgba(20,20,19,.05)] [--popover-foreground:#141413] [--popover:#fff] [--ring:#141413] dark:[--background:#141413] dark:[--border:#27272A] dark:[--foreground:#FAFAF8] dark:[--muted-foreground:#A1A1AA] dark:[--muted:#27272A] dark:[--pe-accent:#FAFAF8] dark:[--pe-band:rgba(250,250,248,.07)] dark:[--popover-foreground:#FAFAF8] dark:[--popover:#18181B] dark:[--ring:#FAFAF8]",
+  glass:
+    "[--background:rgba(24,22,44,.9)] [--border:rgba(255,255,255,.3)] [--foreground:#fff] [--muted-foreground:rgba(255,255,255,.72)] [--muted:rgba(255,255,255,.14)] [--pe-accent:#fff] [--pe-axis:rgba(255,255,255,.72)] [--pe-band:rgba(255,255,255,.14)] [--popover-foreground:#fff] [--popover:rgba(255,255,255,.16)] [--ring:#fff]",
+};
+
 function mulberry32(seed: number) {
   return () => {
     seed = (seed + 0x6d2b79f5) | 0;
@@ -92,7 +114,8 @@ type Flight = Box & { rot: number; lift: number; z: number };
 
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
-export default function PriceEvidenceDemo() {
+export default function PriceEvidenceDemo({ look = "minimist" }: { look?: "minimist" | "glass" }) {
+  const glass = look === "glass";
   const [phase, setPhase] = useState<Phase>("idle");
   const [item, setItem] = useState<Item | null>(null);
   // Photos over the page (held, or on their way to the card or home), by item id.
@@ -368,133 +391,198 @@ export default function PriceEvidenceDemo() {
   const status =
     phase === "reading" ? "Reading the photo" : phase === "listing" && item ? `${item.title}, priced` : "";
 
+  const photos = ITEMS.map((it) => {
+    const gone = away(it);
+    return (
+      <div key={it.id} className="flex flex-col items-center gap-1.5">
+        <button
+          type="button"
+          ref={(el) => {
+            slots.current[it.id] = el;
+          }}
+          data-item={it.id}
+          aria-label={`Add the photo of the ${it.title}`}
+          aria-disabled={gone || undefined}
+          onPointerDown={(e) => onRowDown(e, it)}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+          onClick={() => (skipClick.current ? (skipClick.current = false) : add(it))}
+          className={
+            glass
+              ? "relative size-14 touch-none overflow-hidden rounded-[16px] shadow-[0_8px_20px_-10px_rgba(0,0,0,.55)] outline-none select-none focus-visible:ring-2 focus-visible:ring-white sm:size-16"
+              : "relative size-16 touch-none overflow-hidden rounded-2xl bg-[#f0ebe1] outline-none select-none focus-visible:ring-2 focus-visible:ring-[#141413] focus-visible:ring-offset-2 sm:size-[76px] dark:bg-[#2a2620] dark:focus-visible:ring-[#FAFAF8]"
+          }
+          style={{ cursor: gone ? "default" : "grab" }}
+        >
+          <img src={it.photo} alt="" draggable={false} className="size-full object-cover" style={{ opacity: gone ? 0 : 1 }} />
+          {gone ? (
+            <span
+              className={
+                glass
+                  ? "absolute inset-0 rounded-[16px] bg-white/[0.06] ring-1 ring-white/25 ring-inset"
+                  : "absolute inset-0 rounded-2xl border-[1.5px] border-dashed border-[#d4d4d8] dark:border-[#3f3f46]"
+              }
+            />
+          ) : null}
+        </button>
+        {glass ? null : <span className="text-xs text-[#71717A] dark:text-[#A1A1AA]">{it.label}</span>}
+      </div>
+    );
+  });
+
+  const chip = (label: string) =>
+    glass ? (
+      <Glass radius={999} bezel={10} depth={4} tint="rgba(255,255,255,0.16)" className="absolute bottom-3 left-3">
+        <span className="block px-3 py-1 text-xs font-medium text-white">{label}</span>
+      </Glass>
+    ) : (
+      <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#141413] shadow-sm backdrop-blur">
+        {label}
+      </span>
+    );
+
+  const resetButton = (
+    <button
+      type="button"
+      onClick={reset}
+      data-slot="mnm-reset"
+      className={
+        glass
+          ? "block cursor-pointer px-3 py-1 text-xs font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          : "mnm-rise absolute bottom-3 left-3 cursor-pointer rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#141413] shadow-sm backdrop-blur transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      }
+    >
+      Try another item
+    </button>
+  );
+
+  const card = (
+    <>
+      <div
+        ref={zone}
+        data-slot="mnm-zone"
+        data-over={over || undefined}
+        onPointerDown={onCardDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        className={`mnm-zone relative aspect-[4/3] touch-pan-y overflow-hidden select-none sm:aspect-auto sm:h-full ${glass ? "rounded-[22px]" : "rounded-2xl"}`}
+        style={{ cursor: item && phase !== "idle" ? "grab" : undefined }}
+      >
+        {intent ? (
+          <img
+            src={intent.photo}
+            alt=""
+            draggable={false}
+            data-slot="mnm-intent"
+            className="mnm-rise absolute inset-0 size-full object-cover opacity-45"
+          />
+        ) : item && phase !== "idle" ? (
+          <>
+            <img src={item.photo} alt={item.alt} draggable={false} className="absolute inset-0 size-full object-cover" />
+            {phase === "reading" ? (
+              <>
+                <span className="absolute inset-0 bg-[#141413]/10" />
+                <span className="mnm-scan" />
+                {chip("Reading the photo…")}
+              </>
+            ) : glass ? (
+              <Glass radius={999} bezel={10} depth={4} tint="rgba(255,255,255,0.16)" className="mnm-rise absolute bottom-3 left-3">
+                {resetButton}
+              </Glass>
+            ) : (
+              resetButton
+            )}
+          </>
+        ) : (
+          <div
+            className={
+              glass
+                ? "mnm-well absolute inset-0 grid place-items-center rounded-[22px] px-4 text-center"
+                : "mnm-drop absolute inset-0 grid place-items-center rounded-2xl border-[1.5px] border-dashed px-4 text-center"
+            }
+          >
+            <div>
+              <span
+                className={`mx-auto grid size-9 place-items-center rounded-full ${glass ? "bg-white/15" : "bg-[#141413]/[0.06] dark:bg-white/[0.08]"}`}
+              >
+                <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
+                </svg>
+              </span>
+              <p className="mt-2 text-sm font-medium">Drop a photo of an item</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ opacity: intent ? 0.4 : 1, transition: "opacity 200ms" }} className={`min-w-0 ${TOKENS[look]}`}>
+        {phase === "listing" && item ? (
+          <>
+            <div className="mnm-rise" key={item.id}>
+              <p className="truncate text-lg leading-snug font-medium">{item.title}</p>
+              <p className={`truncate text-sm ${glass ? "text-white/70" : "text-[#71717A] dark:text-[#A1A1AA]"}`}>
+                {item.details}
+              </p>
+            </div>
+            <PriceEvidence key={item.id} sales={sales} ratio={RATIO} className="mt-5" />
+          </>
+        ) : (
+          <Skeleton glass={glass} />
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div
-      className="mnm-demo rounded-[28px] bg-[#FAFAF8] p-3 text-[#141413] sm:p-6 dark:bg-[#0E0E10] dark:text-[#FAFAF8]"
+      className={
+        glass
+          ? "mnm-demo mnm-glass relative isolate overflow-hidden rounded-[28px] p-4 text-white sm:p-8"
+          : "mnm-demo rounded-[28px] bg-[#FAFAF8] p-3 text-[#141413] sm:p-6 dark:bg-[#0E0E10] dark:text-[#FAFAF8]"
+      }
       data-phase={phase}
+      data-look={look}
     >
       <style href="mnm-demo" precedence="default">
         {CSS}
       </style>
-
-      <div className="flex justify-center gap-3 sm:gap-4" data-slot="mnm-tray">
-        {ITEMS.map((it) => {
-          const gone = away(it);
-          return (
-            <div key={it.id} className="flex flex-col items-center gap-1.5">
-              <button
-                type="button"
-                ref={(el) => {
-                  slots.current[it.id] = el;
-                }}
-                data-item={it.id}
-                aria-label={`Add the photo of the ${it.title}`}
-                aria-disabled={gone || undefined}
-                onPointerDown={(e) => onRowDown(e, it)}
-                onPointerMove={onMove}
-                onPointerUp={onUp}
-                onPointerCancel={onUp}
-                onClick={() => (skipClick.current ? (skipClick.current = false) : add(it))}
-                className="relative size-16 touch-none overflow-hidden rounded-2xl bg-[#f0ebe1] outline-none select-none focus-visible:ring-2 focus-visible:ring-[#141413] focus-visible:ring-offset-2 sm:size-[76px] dark:bg-[#2a2620] dark:focus-visible:ring-[#FAFAF8]"
-                style={{ cursor: gone ? "default" : "grab" }}
-              >
-                <img
-                  src={it.photo}
-                  alt=""
-                  draggable={false}
-                  className="size-full object-cover"
-                  style={{ opacity: gone ? 0 : 1 }}
-                />
-                {gone ? (
-                  <span className="absolute inset-0 rounded-2xl border-[1.5px] border-dashed border-[#d4d4d8] dark:border-[#3f3f46]" />
-                ) : null}
-              </button>
-              <span className="text-xs text-[#71717A] dark:text-[#A1A1AA]">{it.label}</span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-4 grid gap-5 rounded-3xl border border-[#E4E4E7] bg-white p-4 shadow-[0_1px_2px_rgba(20,20,19,.04),0_12px_32px_-12px_rgba(20,20,19,.12)] sm:grid-cols-[5fr_7fr] sm:p-6 dark:border-[#27272A] dark:bg-[#141413]">
-        <div
-          ref={zone}
-          data-slot="mnm-zone"
-          data-over={over || undefined}
-          onPointerDown={onCardDown}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerCancel={onUp}
-          className="mnm-zone relative aspect-[4/3] touch-pan-y overflow-hidden rounded-2xl select-none sm:aspect-auto sm:h-full"
-          style={{ cursor: item && phase !== "idle" ? "grab" : undefined }}
-        >
-          {intent ? (
-            <img
-              src={intent.photo}
-              alt=""
-              draggable={false}
-              data-slot="mnm-intent"
-              className="mnm-rise absolute inset-0 size-full object-cover opacity-45"
-            />
-          ) : item && phase !== "idle" ? (
-            <>
-              <img
-                src={item.photo}
-                alt={item.alt}
-                draggable={false}
-                className="absolute inset-0 size-full object-cover"
-              />
-              {phase === "reading" ? (
-                <>
-                  <span className="absolute inset-0 bg-[#141413]/10" />
-                  <span className="mnm-scan" />
-                  <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#141413] shadow-sm backdrop-blur">
-                    Reading the photo…
-                  </span>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={reset}
-                  data-slot="mnm-reset"
-                  className="mnm-rise absolute bottom-3 left-3 cursor-pointer rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#141413] shadow-sm backdrop-blur transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                >
-                  Try another item
-                </button>
-              )}
-            </>
-          ) : (
-            <div className="mnm-drop absolute inset-0 grid place-items-center rounded-2xl border-[1.5px] border-dashed px-4 text-center">
-              <div>
-                <span className="mx-auto grid size-9 place-items-center rounded-full bg-[#141413]/[0.06] dark:bg-white/[0.08]">
-                  <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
-                  </svg>
-                </span>
-                <p className="mt-2 text-sm font-medium">Drop a photo of an item</p>
-              </div>
-            </div>
-          )}
+      {glass ? (
+        <div aria-hidden data-slot="mnm-backdrop" className="pointer-events-none absolute inset-0 -z-10">
+          <Shader value={BACKDROP} play="always" />
         </div>
+      ) : null}
 
-        <div
-          style={{ opacity: intent ? 0.4 : 1, transition: "opacity 200ms" }}
-          className="min-w-0 [--background:#fff] [--border:#E4E4E7] [--foreground:#141413] [--muted-foreground:#71717A] [--muted:#F4F4F5] [--pe-accent:#141413] [--pe-axis:#9a9aa3] [--pe-band:rgba(20,20,19,.05)] [--popover-foreground:#141413] [--popover:#fff] [--ring:#141413] dark:[--background:#141413] dark:[--border:#27272A] dark:[--foreground:#FAFAF8] dark:[--muted-foreground:#A1A1AA] dark:[--muted:#27272A] dark:[--pe-accent:#FAFAF8] dark:[--pe-band:rgba(250,250,248,.07)] dark:[--popover-foreground:#FAFAF8] dark:[--popover:#18181B] dark:[--ring:#FAFAF8]"
-        >
-          {phase === "listing" && item ? (
-            <>
-              <div className="mnm-rise" key={item.id}>
-                <p className="truncate text-lg leading-snug font-medium">{item.title}</p>
-                <p className="truncate text-sm text-[#71717A] dark:text-[#A1A1AA]">{item.details}</p>
-              </div>
-              <PriceEvidence key={item.id} sales={sales} ratio={RATIO} className="mt-5" />
-            </>
-          ) : (
-            <Skeleton />
-          )}
+      {glass ? (
+        <div className="flex justify-center" data-slot="mnm-tray">
+          <Glass radius={30} bezel={20} depth={8} tint="rgba(255,255,255,0.10)" className="flex gap-3 p-2.5 sm:gap-3.5 sm:p-3">
+            {photos}
+          </Glass>
         </div>
-      </div>
+      ) : (
+        <div className="flex justify-center gap-3 sm:gap-4" data-slot="mnm-tray">
+          {photos}
+        </div>
+      )}
 
-      <p className="mt-3 px-2 text-xs text-[#71717A] dark:text-[#A1A1AA]">
+      {glass ? (
+        <Glass
+          radius={34}
+          bezel={30}
+          depth={12}
+          tint="rgba(16,14,34,0.34)"
+          className="mt-5 grid gap-5 p-4 sm:grid-cols-[5fr_7fr] sm:p-6"
+        >
+          {card}
+        </Glass>
+      ) : (
+        <div className="mt-4 grid gap-5 rounded-3xl border border-[#E4E4E7] bg-white p-4 shadow-[0_1px_2px_rgba(20,20,19,.04),0_12px_32px_-12px_rgba(20,20,19,.12)] sm:grid-cols-[5fr_7fr] sm:p-6 dark:border-[#27272A] dark:bg-[#141413]">
+          {card}
+        </div>
+      )}
+
+      <p className={glass ? "mt-4 px-2 text-center text-xs text-white/75" : "mt-3 px-2 text-xs text-[#71717A] dark:text-[#A1A1AA]"}>
         A design concept in Minimist's style, not affiliated with Minimist. Photos from Unsplash; the
         sales are made up.
       </p>
@@ -515,7 +603,7 @@ export default function PriceEvidenceDemo() {
                 }}
                 aria-hidden
                 data-slot="mnm-ghost"
-                className="pointer-events-none fixed top-0 left-0 overflow-hidden rounded-2xl"
+                className={`pointer-events-none fixed top-0 left-0 overflow-hidden ${glass ? "rounded-[16px] ring-1 ring-white/45" : "rounded-2xl"}`}
               >
                 <img src={it.photo} alt="" className="size-full object-cover" />
               </div>,
@@ -529,7 +617,9 @@ export default function PriceEvidenceDemo() {
 }
 
 /** The listing before there is one: the same lines at the same heights, as faint bars. */
-function Skeleton() {
+function Skeleton({ glass }: { glass: boolean }) {
+  const label = glass ? "text-white/50" : "text-[#a1a1aa] dark:text-[#52525b]";
+  const faint = glass ? "text-white/30" : "text-[#d4d4d8] dark:text-[#3f3f46]";
   return (
     <div aria-hidden>
       <p className="text-lg leading-snug">
@@ -541,18 +631,18 @@ function Skeleton() {
       <div className="mt-5">
         <div className="flex flex-col items-start gap-y-1">
           <div>
-            <p className="text-sm text-[#a1a1aa] dark:text-[#52525b]">Suggested price</p>
-            <p className="mt-1 text-[1.75rem] leading-tight font-semibold tracking-tight text-[#d4d4d8] sm:text-3xl dark:text-[#3f3f46]">
+            <p className={`text-sm ${label}`}>Suggested price</p>
+            <p className={`mt-1 text-[1.75rem] leading-tight font-semibold tracking-tight sm:text-3xl ${faint}`}>
               £?? – £??
             </p>
           </div>
           <div className="flex items-center gap-2 pb-1">
-            <p className="text-sm text-[#d4d4d8] dark:text-[#3f3f46]">Based on … similar sales</p>
+            <p className={`text-sm ${faint}`}>Based on … similar sales</p>
             <span className="size-7" />
           </div>
         </div>
         <div className="mt-4 flex items-end" style={{ aspectRatio: `640 / ${RATIO * 640 + 2}` }}>
-          <span className="block h-px w-full bg-[#e4e4e7] dark:bg-[#27272a]" />
+          <span className={`block h-px w-full ${glass ? "bg-white/25" : "bg-[#e4e4e7] dark:bg-[#27272a]"}`} />
         </div>
         <div className="h-6" />
       </div>
@@ -575,6 +665,11 @@ const CSS = `
 .mnm-demo [data-slot=price-evidence]>div:first-child{flex-direction:column;align-items:flex-start}
 .mnm-rise{animation:mnm-rise 420ms cubic-bezier(.2,.8,.2,1) both}
 @keyframes mnm-rise{from{opacity:0;transform:translateY(6px)}}
-@media (prefers-reduced-motion:reduce){.mnm-scan,.mnm-bar,.mnm-demo [data-slot=price-evidence]>div:first-child{flex-direction:column;align-items:flex-start}
-.mnm-rise{animation:none!important}.mnm-scan{display:none}}
+@media (prefers-reduced-motion:reduce){.mnm-scan,.mnm-bar,.mnm-rise{animation:none!important}.mnm-scan{display:none}}
+.mnm-demo.mnm-glass,.mnm-demo.mnm-glass *{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",system-ui,sans-serif}
+.mnm-glass .mnm-well{background:rgba(255,255,255,.07);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);color:#fff;transition:background-color .15s,box-shadow .15s,transform .2s}
+.mnm-glass .mnm-zone[data-over] .mnm-well{background:rgba(255,255,255,.14);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.75);transform:scale(.985)}
+.mnm-glass .mnm-bar{background-image:linear-gradient(90deg,rgba(255,255,255,.13) 0%,rgba(255,255,255,.13) 35%,rgba(255,255,255,.3) 50%,rgba(255,255,255,.13) 65%,rgba(255,255,255,.13) 100%)}
+.mnm-glass .pe-plot .z-10{border-radius:999px;border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.16);backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 8px 24px -8px rgba(0,0,0,.45)}
+.mnm-glass [data-slot=price-evidence-replay]:hover{background:rgba(255,255,255,.14)}
 `;
