@@ -58,15 +58,16 @@ export const ITEMS: Item[] = [
 const RATIO = 0.42;
 const READING_MS = 1200;
 
-/** Behind the glass look: soft spots of iOS system colours drifting slowly (cardstock's mesh). */
+/** Behind the glass look: black, with a soft grey light drifting slowly (cardstock's mesh in
+ * zinc greys) under a fine grid, whose lines are what the glass visibly bends. */
 const BACKDROP = shaderBackground("mesh", {
-  color: "#3b2f9f",
-  speed: 0.3,
+  color: "#09090b",
+  speed: 0.25,
   params: {
-    colors: ["#0A84FF", "#5E5CE6", "#BF5AF2", "#FF375F", "#FF9F0A"],
-    distortion: 0.85,
-    swirl: 0.5,
-    grain: 0.04,
+    colors: ["#050506", "#09090b", "#101013", "#18181c", "#2c2c32"],
+    distortion: 0.6,
+    swirl: 0.3,
+    grain: 0.06,
   },
 });
 
@@ -75,7 +76,7 @@ const TOKENS = {
   minimist:
     "[--background:#fff] [--border:#E4E4E7] [--foreground:#141413] [--muted-foreground:#71717A] [--muted:#F4F4F5] [--pe-accent:#141413] [--pe-axis:#9a9aa3] [--pe-band:rgba(20,20,19,.05)] [--popover-foreground:#141413] [--popover:#fff] [--ring:#141413] dark:[--background:#141413] dark:[--border:#27272A] dark:[--foreground:#FAFAF8] dark:[--muted-foreground:#A1A1AA] dark:[--muted:#27272A] dark:[--pe-accent:#FAFAF8] dark:[--pe-band:rgba(250,250,248,.07)] dark:[--popover-foreground:#FAFAF8] dark:[--popover:#18181B] dark:[--ring:#FAFAF8]",
   glass:
-    "[--background:rgba(24,22,44,.9)] [--border:rgba(255,255,255,.3)] [--foreground:#fff] [--muted-foreground:rgba(255,255,255,.72)] [--muted:rgba(255,255,255,.14)] [--pe-accent:#fff] [--pe-axis:rgba(255,255,255,.72)] [--pe-band:rgba(255,255,255,.14)] [--popover-foreground:#fff] [--popover:rgba(255,255,255,.16)] [--ring:#fff]",
+    "[--background:rgba(14,14,16,.92)] [--border:rgba(255,255,255,.3)] [--foreground:#fff] [--muted-foreground:rgba(255,255,255,.72)] [--muted:rgba(255,255,255,.14)] [--pe-accent:#fff] [--pe-axis:rgba(255,255,255,.72)] [--pe-band:rgba(255,255,255,.14)] [--popover-foreground:#fff] [--popover:rgba(255,255,255,.16)] [--ring:#fff]",
 };
 
 function mulberry32(seed: number) {
@@ -539,7 +540,7 @@ export default function PriceEvidenceDemo({ look = "minimist" }: { look?: "minim
     <div
       className={
         glass
-          ? "mnm-demo mnm-glass relative isolate overflow-hidden rounded-[28px] p-4 text-white sm:p-8"
+          ? "mnm-demo mnm-glass relative isolate overflow-hidden rounded-[28px] bg-[#09090b] p-4 text-white sm:p-8"
           : "mnm-demo rounded-[28px] bg-[#FAFAF8] p-3 text-[#141413] sm:p-6 dark:bg-[#0E0E10] dark:text-[#FAFAF8]"
       }
       data-phase={phase}
@@ -551,6 +552,8 @@ export default function PriceEvidenceDemo({ look = "minimist" }: { look?: "minim
       {glass ? (
         <div aria-hidden data-slot="mnm-backdrop" className="pointer-events-none absolute inset-0 -z-10">
           <Shader value={BACKDROP} play="always" />
+          <div className="mnm-grid absolute inset-0" />
+          <div className="mnm-spot absolute inset-0" />
         </div>
       ) : null}
 
@@ -571,7 +574,7 @@ export default function PriceEvidenceDemo({ look = "minimist" }: { look?: "minim
           radius={34}
           bezel={30}
           depth={12}
-          tint="rgba(16,14,34,0.34)"
+          tint="rgba(10,10,12,0.42)"
           className="mt-5 grid gap-5 p-4 sm:grid-cols-[5fr_7fr] sm:p-6"
         >
           {card}
@@ -666,6 +669,8 @@ const CSS = `
 .mnm-rise{animation:mnm-rise 420ms cubic-bezier(.2,.8,.2,1) both}
 @keyframes mnm-rise{from{opacity:0;transform:translateY(6px)}}
 @media (prefers-reduced-motion:reduce){.mnm-scan,.mnm-bar,.mnm-rise{animation:none!important}.mnm-scan{display:none}}
+.mnm-grid{background-image:linear-gradient(rgba(255,255,255,.085) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.085) 1px,transparent 1px);background-size:32px 32px;background-position:center;-webkit-mask-image:radial-gradient(ellipse 75% 70% at 50% 45%,#000 35%,transparent 85%);mask-image:radial-gradient(ellipse 75% 70% at 50% 45%,#000 35%,transparent 85%)}
+.mnm-spot{background:radial-gradient(ellipse 55% 45% at 50% -8%,rgba(255,255,255,.16),rgba(255,255,255,.05) 45%,transparent 75%)}
 .mnm-demo.mnm-glass,.mnm-demo.mnm-glass *{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",system-ui,sans-serif}
 .mnm-glass .mnm-well{background:rgba(255,255,255,.07);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);color:#fff;transition:background-color .15s,box-shadow .15s,transform .2s}
 .mnm-glass .mnm-zone[data-over] .mnm-well{background:rgba(255,255,255,.14);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.75);transform:scale(.985)}
