@@ -16,7 +16,8 @@ import {
  * count ticks up as they land, and the range settles and claims its dots. Point at any dot (or use
  * the arrow keys) to see that sale.
  *
- * Colours come from shadcn tokens; set `--pe-accent` (and `--pe-dot`, `--pe-band`) to restyle. */
+ * Colours come from shadcn tokens. To restyle, set `--pe-accent`, `--pe-dot`, `--pe-band` or
+ * `--pe-axis` on it or on any parent (a `dark:` class works too). */
 
 export type Sale = {
   /** What it sold for, in the currency's main unit (41.5 is £41.50). */
@@ -39,6 +40,9 @@ export type PriceEvidenceProps = {
   step?: number;
   /** Drop the sales in on first view. Off (and under reduced motion) they are shown in place. */
   animate?: boolean;
+  /** The plot's height as a share of its width. Dots shrink to fit it; without it, the plot is as
+   *  tall as its tallest column needs. */
+  ratio?: number;
   label?: string;
   basis?: (count: number) => string;
   className?: string;
@@ -87,7 +91,7 @@ function tickStep(span: number) {
   return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * pow;
 }
 
-function layout(sales: Sale[], step: number, given?: [number, number]) {
+function layout(sales: Sale[], step: number, given?: [number, number], ratio?: number) {
   const prices = sales.map((s) => s.price).sort((a, b) => a - b);
   // Columns are centred on multiples of `step`, so £37.99 counts as £38, the way people read it.
   const snap = (price: number) => Math.round(price / step) * step;
@@ -95,8 +99,6 @@ function layout(sales: Sale[], step: number, given?: [number, number]) {
   const hi = snap(prices.at(-1) ?? 0);
   const cols = Math.round((hi - lo) / step) + 1;
   const colW = (W - 2 * PAD_X) / cols;
-  const r = Math.min(colW * 0.4, 6);
-  const pitch = r * 2 + Math.max(1, r * 0.35);
   const range: [number, number] = given ?? [snap(quantile(prices, 0.25)), snap(quantile(prices, 0.75))];
   const colOf = (price: number) => Math.round((snap(price) - lo) / step);
   const xOf = (price: number) => PAD_X + ((price - lo) / step + 0.5) * colW;
@@ -115,7 +117,12 @@ function layout(sales: Sale[], step: number, given?: [number, number]) {
     return { sale, col, h: heights[col]!++, k };
   });
   const tallest = Math.max(1, ...heights);
-  const baseline = TOP + tallest * pitch;
+  // Dots are as big as the columns allow. With a fixed `ratio` the plot keeps its height, and the
+  // dots shrink until the tallest column fits (a pitch of 2r plus a gap of 0.35r, at least 1).
+  const fit = ratio ? (ratio * W - TOP) / tallest : Infinity;
+  const r = Math.min(colW * 0.4, 6, fit >= 1 / 0.35 * 2.35 ? fit / 2.35 : (fit - 1) / 2);
+  const pitch = r * 2 + Math.max(1, r * 0.35);
+  const baseline = ratio ? ratio * W : TOP + tallest * pitch;
   const bandLeft = xOf(range[0]) - colW / 2;
   const bandRight = xOf(range[1]) + colW / 2;
   const mid = (bandLeft + bandRight) / 2;
@@ -164,12 +171,13 @@ export function PriceEvidence({
   locale = "en-GB",
   step = 1,
   animate = true,
+  ratio,
   label = "Suggested price",
   basis = (n) => `Based on ${n} similar ${n === 1 ? "sale" : "sales"}`,
   className,
   style,
 }: PriceEvidenceProps) {
-  const plot = useMemo(() => layout(sales, step, givenRange), [sales, step, givenRange]);
+  const plot = useMemo(() => layout(sales, step, givenRange, ratio), [sales, step, givenRange, ratio]);
   const whole = useMemo(
     () => new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 }),
     [locale, currency],
@@ -462,23 +470,23 @@ function Roll({ value, format, on, at }: { value: number; format: Intl.NumberFor
 const DIGITS = ["?", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 const CSS = `
-.pe-root{--pe-accent:var(--primary);--pe-dot:color-mix(in oklab,currentColor 30%,transparent);--pe-band:color-mix(in oklab,var(--pe-accent) 13%,transparent);--pe-ease:linear(0,.06 12.5%,.25 25%,.56 37.5%,1 50%,.955 58%,.94 63%,.955 68%,1 76%,.992 86%,1)}
+.pe-root{--pe-a:var(--pe-accent,var(--primary));--pe-d:var(--pe-dot,color-mix(in oklab,currentColor 30%,transparent));--pe-b:var(--pe-band,color-mix(in oklab,var(--pe-a) 13%,transparent));--pe-ease:linear(0,.06 12.5%,.25 25%,.56 37.5%,1 50%,.955 58%,.94 63%,.955 68%,1 76%,.992 86%,1)}
 .pe-root .pe-plot svg{color:var(--pe-axis,var(--muted-foreground))}
-.pe-dot{fill:var(--pe-dot)}
-.pe-dot[data-in]{fill:var(--pe-accent)}
+.pe-dot{fill:var(--pe-d)}
+.pe-dot[data-in]{fill:var(--pe-a)}
 .pe-root[data-phase=idle] .pe-dot{transform:translateY(var(--from))}
 .pe-root[data-phase=playing] .pe-dot{animation:pe-drop ${DROP_MS}ms var(--pe-ease) var(--d) both}
 .pe-root[data-phase=playing] .pe-dot[data-in]{animation:pe-drop ${DROP_MS}ms var(--pe-ease) var(--d) both,pe-tint 380ms ease-out var(--tint) both}
-.pe-band{fill:var(--pe-band);transform-box:fill-box;transform-origin:center}
+.pe-band{fill:var(--pe-b);transform-box:fill-box;transform-origin:center}
 .pe-root[data-phase=idle] .pe-band{transform:scaleX(0);opacity:0}
 .pe-root[data-phase=playing] .pe-band{animation:pe-band ${BAND_MS}ms cubic-bezier(.2,.8,.2,1) var(--at) both}
-.pe-ring{fill:var(--pe-accent);stroke:var(--background,#fff);stroke-width:2.5}
+.pe-ring{fill:var(--pe-a);stroke:var(--background,#fff);stroke-width:2.5}
 .pe-digit-box{display:inline-block;height:1.2em;line-height:1.2em;overflow:hidden;-webkit-mask-image:linear-gradient(transparent,#000 16%,#000 80%,transparent);mask-image:linear-gradient(transparent,#000 16%,#000 80%,transparent)}
 .pe-digit{display:flex;flex-direction:column;text-align:center;transition:transform 820ms cubic-bezier(.16,1,.3,1)}
 .pe-digit>span{display:block;height:1.2em}
 .pe-root[data-phase=idle] .pe-digit{transition:none}
 @keyframes pe-drop{from{transform:translateY(var(--from))}to{transform:translateY(0)}}
-@keyframes pe-tint{from{fill:var(--pe-dot)}to{fill:var(--pe-accent)}}
+@keyframes pe-tint{from{fill:var(--pe-d)}to{fill:var(--pe-a)}}
 @keyframes pe-band{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
 .pe-root[data-still] .pe-dot,.pe-root[data-still] .pe-band{animation:none!important;transform:none!important;opacity:1}
 .pe-root[data-still] .pe-digit{transition:none}
