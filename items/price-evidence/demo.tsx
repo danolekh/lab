@@ -586,8 +586,8 @@ export default function PriceEvidenceDemo({ look = "minimist" }: { look?: "minim
       )}
 
       <p className={glass ? "mt-4 px-2 text-center text-xs text-white/75" : "mt-3 px-2 text-xs text-[#71717A] dark:text-[#A1A1AA]"}>
-        A design concept in Minimist's style, not affiliated with Minimist. Photos from Unsplash; the
-        sales are made up.
+        {glass ? "A design concept for Minimist" : "A design concept in Minimist's style"}, not affiliated with
+        Minimist. Photos from Unsplash; the sales are made up.
       </p>
 
       <p className="sr-only" aria-live="polite">
