@@ -86,7 +86,9 @@ export function demoSales({ count, center, spread, seed }: Item["sales"]): Sale[
 
 type Phase = "idle" | "reading" | "listing";
 type Box = { x: number; y: number; w: number; h: number };
-type Flight = Box & { rot: number; lift: number };
+/** A photo in the air. `z` stacks them: the one in the hand or arriving is on top (3), one going
+ * home in between (2), and one making room in the card below (1). */
+type Flight = Box & { rot: number; lift: number; z: number };
 
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
@@ -96,6 +98,8 @@ export default function PriceEvidenceDemo() {
   // Photos over the page (held, or on their way to the card or home), by item id.
   const [flying, setFlying] = useState<string[]>([]);
   const [over, setOver] = useState(false);
+  // A photo held over a card that already has one: the card shows it faintly and makes room.
+  const [intent, setIntent] = useState<Item | null>(null);
   const [still, setStill] = useState(false);
 
   const zone = useRef<HTMLDivElement>(null);
@@ -106,6 +110,10 @@ export default function PriceEvidenceDemo() {
   const frames = useRef<Record<string, number>>({});
   // The item in the card, for callbacks that run after the render that made them.
   const current = useRef<Item | null>(null);
+  const air = useRef(new Set<string>());
+  const intentRef = useRef<Item | null>(null);
+  // The photo that moved up out of the card to make room, while it waits there.
+  const lifted = useRef<string | null>(null);
   const drag = useRef<{
     item: Item;
     from: "row" | "card";
@@ -142,6 +150,7 @@ export default function PriceEvidenceDemo() {
     el.style.height = `${b.h}px`;
     el.style.transform = `translate(${b.x}px, ${b.y}px) rotate(${b.rot}deg) scale(${1 + b.lift * 0.06})`;
     el.style.boxShadow = `0 ${4 + b.lift * 16}px ${10 + b.lift * 28}px -10px rgba(20,20,19,${0.18 + b.lift * 0.22})`;
+    el.style.zIndex = String(2147483000 + b.z);
   };
 
   const boxOf = (el: Element | null | undefined): Box => {
@@ -149,24 +158,32 @@ export default function PriceEvidenceDemo() {
     return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : { x: 0, y: 0, w: 0, h: 0 };
   };
   const home = (it: Item) => boxOf(slots.current[it.id]);
+  /** Where the photo in the card goes to make room: half its size, riding over the card's top edge. */
+  const room = (): Box => {
+    const z = boxOf(zone.current);
+    return { x: z.x + z.w * 0.25, y: z.y - z.h * 0.18, w: z.w * 0.5, h: z.h * 0.5 };
+  };
   const inZone = (x: number, y: number) => {
     const b = boxOf(zone.current);
     return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   };
 
   /** Puts a photo over the page at `box`. */
-  const launch = (id: string, box: Box) => {
+  const launch = (id: string, box: Box, z = 3) => {
     cancelAnimationFrame(frames.current[id] ?? 0);
-    boxes.current[id] = { ...box, rot: 0, lift: 0 };
+    boxes.current[id] = { ...box, rot: 0, lift: 0, z };
+    air.current.add(id);
     setFlying((f) => (f.includes(id) ? f : [...f, id]));
   };
   const land = (id: string) => {
     cancelAnimationFrame(frames.current[id] ?? 0);
+    air.current.delete(id);
     setFlying((f) => f.filter((x) => x !== id));
   };
 
-  /** Moves a photo in flight from where it is to `to`, on a slight arc, then calls `done`. */
-  const fly = (id: string, to: Box, ms: number, done: () => void) => {
+  /** Moves a photo in flight from where it is to `to`, on a slight arc, then calls `done`. It
+   * settles to `lift` (0 is resting flat, 1 is held). */
+  const fly = (id: string, to: Box, ms: number, done: () => void, lift = 0) => {
     cancelAnimationFrame(frames.current[id] ?? 0);
     const from = { ...boxes.current[id]! };
     const start = performance.now();
@@ -179,7 +196,8 @@ export default function PriceEvidenceDemo() {
         w: from.w + (to.w - from.w) * e,
         h: from.h + (to.h - from.h) * e,
         rot: from.rot * (1 - e),
-        lift: from.lift * (1 - e),
+        lift: from.lift + (lift - from.lift) * e,
+        z: from.z,
       };
       paint(id);
       if (t < 1) frames.current[id] = requestAnimationFrame(step);
@@ -197,13 +215,44 @@ export default function PriceEvidenceDemo() {
     if (!still) timer.current = setTimeout(() => setPhase("listing"), READING_MS);
   };
 
-  /** A photo has reached the card: it's read, and whatever was there is pushed out and flies home. */
+  /** Sends the photo that was in the card home: from where it moved up to, if it made room. */
+  const sendHome = (prev: Item) => {
+    if (lifted.current === prev.id) lifted.current = null;
+    else if (air.current.has(prev.id)) return;
+    else launch(prev.id, boxOf(zone.current), 1);
+    boxes.current[prev.id]!.z = 2;
+    fly(prev.id, home(prev), 560, () => land(prev.id));
+  };
+
+  /** Another photo is on its way into a full card: the one there moves up to make room for it. */
+  const makeRoom = (next: Item) => {
+    const prev = current.current;
+    if (!prev || prev.id === next.id || still || intentRef.current?.id === next.id) return;
+    intentRef.current = next;
+    setIntent(next);
+    if (lifted.current !== prev.id) {
+      if (!air.current.has(prev.id)) launch(prev.id, boxOf(zone.current), 1);
+      lifted.current = prev.id;
+    }
+    fly(prev.id, room(), 300, () => {}, 0.7);
+  };
+
+  /** It went away again: the photo that made room settles back into the card. */
+  const settle = () => {
+    intentRef.current = null;
+    setIntent(null);
+    const prev = current.current;
+    if (!prev || lifted.current !== prev.id) return;
+    lifted.current = null;
+    fly(prev.id, boxOf(zone.current), 280, () => land(prev.id));
+  };
+
+  /** A photo has reached the card: it's read, and whatever was there goes home. */
   const place = (next: Item) => {
     const prev = current.current;
-    if (prev && prev.id !== next.id && !still) {
-      launch(prev.id, boxOf(zone.current));
-      fly(prev.id, home(prev), 520, () => land(prev.id));
-    }
+    if (prev && prev.id !== next.id && !still) sendHome(prev);
+    intentRef.current = null;
+    setIntent(null);
     show(next);
     land(next.id);
   };
@@ -214,6 +263,7 @@ export default function PriceEvidenceDemo() {
   const add = (next: Item) => {
     if (away(next)) return;
     if (still) return show(next);
+    makeRoom(next);
     launch(next.id, home(next));
     fly(next.id, boxOf(zone.current), 460, () => place(next));
   };
@@ -223,7 +273,7 @@ export default function PriceEvidenceDemo() {
     if (!prev) return;
     show(null);
     if (still) return;
-    launch(prev.id, boxOf(zone.current));
+    launch(prev.id, boxOf(zone.current), 2);
     fly(prev.id, home(prev), 520, () => land(prev.id));
   };
 
@@ -289,7 +339,12 @@ export default function PriceEvidenceDemo() {
     d.vel = (e.clientX - d.last.x) / Math.max(8, now - d.last.t);
     d.last = { x: e.clientX, t: now };
     d.at = { x: e.clientX, y: e.clientY };
-    setOver(inZone(e.clientX, e.clientY));
+    const inside = inZone(e.clientX, e.clientY);
+    setOver(inside);
+    if (d.from === "row") {
+      if (inside) makeRoom(d.item);
+      else if (intentRef.current) settle();
+    }
   };
 
   const onUp = (e: ReactPointerEvent<HTMLElement>) => {
@@ -299,8 +354,15 @@ export default function PriceEvidenceDemo() {
     if (d.from === "row") skipClick.current = true;
     setOver(false);
     const id = d.item.id;
-    if (inZone(e.clientX, e.clientY)) fly(id, boxOf(zone.current), 320, () => place(d.item));
-    else fly(id, home(d.item), 460, () => land(id));
+    if (inZone(e.clientX, e.clientY)) {
+      // Let go over the card: the one that made room heads home now, from where it is.
+      const prev = current.current;
+      if (prev && prev.id !== id && lifted.current === prev.id) sendHome(prev);
+      fly(id, boxOf(zone.current), 320, () => place(d.item));
+    } else {
+      if (intentRef.current) settle();
+      fly(id, home(d.item), 460, () => land(id));
+    }
   };
 
   const status =
@@ -365,7 +427,15 @@ export default function PriceEvidenceDemo() {
           className="mnm-zone relative aspect-[4/3] touch-pan-y overflow-hidden rounded-2xl select-none sm:aspect-auto sm:h-full"
           style={{ cursor: item && phase !== "idle" ? "grab" : undefined }}
         >
-          {item && phase !== "idle" ? (
+          {intent ? (
+            <img
+              src={intent.photo}
+              alt=""
+              draggable={false}
+              data-slot="mnm-intent"
+              className="mnm-rise absolute inset-0 size-full object-cover opacity-45"
+            />
+          ) : item && phase !== "idle" ? (
             <>
               <img
                 src={item.photo}
@@ -406,7 +476,10 @@ export default function PriceEvidenceDemo() {
           )}
         </div>
 
-        <div className="min-w-0 [--background:#fff] [--border:#E4E4E7] [--foreground:#141413] [--muted-foreground:#71717A] [--muted:#F4F4F5] [--pe-accent:#141413] [--pe-axis:#9a9aa3] [--pe-band:rgba(20,20,19,.05)] [--popover-foreground:#141413] [--popover:#fff] [--ring:#141413] dark:[--background:#141413] dark:[--border:#27272A] dark:[--foreground:#FAFAF8] dark:[--muted-foreground:#A1A1AA] dark:[--muted:#27272A] dark:[--pe-accent:#FAFAF8] dark:[--pe-band:rgba(250,250,248,.07)] dark:[--popover-foreground:#FAFAF8] dark:[--popover:#18181B] dark:[--ring:#FAFAF8]">
+        <div
+          style={{ opacity: intent ? 0.4 : 1, transition: "opacity 200ms" }}
+          className="min-w-0 [--background:#fff] [--border:#E4E4E7] [--foreground:#141413] [--muted-foreground:#71717A] [--muted:#F4F4F5] [--pe-accent:#141413] [--pe-axis:#9a9aa3] [--pe-band:rgba(20,20,19,.05)] [--popover-foreground:#141413] [--popover:#fff] [--ring:#141413] dark:[--background:#141413] dark:[--border:#27272A] dark:[--foreground:#FAFAF8] dark:[--muted-foreground:#A1A1AA] dark:[--muted:#27272A] dark:[--pe-accent:#FAFAF8] dark:[--pe-band:rgba(250,250,248,.07)] dark:[--popover-foreground:#FAFAF8] dark:[--popover:#18181B] dark:[--ring:#FAFAF8]"
+        >
           {phase === "listing" && item ? (
             <>
               <div className="mnm-rise" key={item.id}>
@@ -442,7 +515,7 @@ export default function PriceEvidenceDemo() {
                 }}
                 aria-hidden
                 data-slot="mnm-ghost"
-                className="pointer-events-none fixed top-0 left-0 z-[2147483001] overflow-hidden rounded-2xl"
+                className="pointer-events-none fixed top-0 left-0 overflow-hidden rounded-2xl"
               >
                 <img src={it.photo} alt="" className="size-full object-cover" />
               </div>,
