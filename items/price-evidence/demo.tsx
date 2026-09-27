@@ -1,12 +1,5 @@
 import "@fontsource-variable/rubik";
-import {
-  type PointerEvent as ReactPointerEvent,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PriceEvidence, type Sale } from "./price-evidence";
 
@@ -93,31 +86,38 @@ export function demoSales({ count, center, spread, seed }: Item["sales"]): Sale[
 
 type Phase = "idle" | "reading" | "listing";
 type Box = { x: number; y: number; w: number; h: number };
+type Flight = Box & { rot: number; lift: number };
 
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
 export default function PriceEvidenceDemo() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [item, setItem] = useState<Item | null>(null);
-  const [ghost, setGhost] = useState<Item | null>(null);
+  // Photos over the page (held, or on their way to the card or home), by item id.
+  const [flying, setFlying] = useState<string[]>([]);
   const [over, setOver] = useState(false);
   const [still, setStill] = useState(false);
 
   const zone = useRef<HTMLDivElement>(null);
   const slots = useRef<Record<string, HTMLButtonElement | null>>({});
-  const ghostEl = useRef<HTMLDivElement>(null);
-  // Where the photo in flight is, painted straight onto its element each frame.
-  const g = useRef({ x: 0, y: 0, w: 0, h: 0, rot: 0, lift: 0 });
+  const els = useRef<Record<string, HTMLDivElement | null>>({});
+  // Where each photo in flight is, painted straight onto its element each frame.
+  const boxes = useRef<Record<string, Flight>>({});
+  const frames = useRef<Record<string, number>>({});
+  // The item in the card, for callbacks that run after the render that made them.
+  const current = useRef<Item | null>(null);
   const drag = useRef<{
     item: Item;
-    from: { x: number; y: number };
+    from: "row" | "card";
+    start: { x: number; y: number };
+    at: { x: number; y: number };
+    /** Where it was grabbed, as a share of its size, so the photo keeps it under the pointer. */
     grab: { x: number; y: number };
     moved: boolean;
     vel: number;
     last: { x: number; t: number };
   } | null>(null);
   const skipClick = useRef(false);
-  const frame = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const sales = useMemo(() => (item ? demoSales(item.sales) : []), [item]);
@@ -129,40 +129,51 @@ export default function PriceEvidenceDemo() {
     mq.addEventListener("change", update);
     return () => {
       mq.removeEventListener("change", update);
-      cancelAnimationFrame(frame.current);
+      Object.values(frames.current).forEach(cancelAnimationFrame);
       clearTimeout(timer.current);
     };
   }, []);
 
-  const paint = () => {
-    const el = ghostEl.current;
-    if (!el) return;
-    const { x, y, w, h, rot, lift } = g.current;
-    el.style.width = `${w}px`;
-    el.style.height = `${h}px`;
-    el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${1 + lift * 0.06})`;
-    el.style.boxShadow = `0 ${4 + lift * 16}px ${10 + lift * 28}px -10px rgba(20,20,19,${0.18 + lift * 0.22})`;
+  const paint = (id: string) => {
+    const el = els.current[id];
+    const b = boxes.current[id];
+    if (!el || !b) return;
+    el.style.width = `${b.w}px`;
+    el.style.height = `${b.h}px`;
+    el.style.transform = `translate(${b.x}px, ${b.y}px) rotate(${b.rot}deg) scale(${1 + b.lift * 0.06})`;
+    el.style.boxShadow = `0 ${4 + b.lift * 16}px ${10 + b.lift * 28}px -10px rgba(20,20,19,${0.18 + b.lift * 0.22})`;
   };
-  useLayoutEffect(paint, [ghost]);
 
   const boxOf = (el: Element | null | undefined): Box => {
     const r = el?.getBoundingClientRect();
     return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : { x: 0, y: 0, w: 0, h: 0 };
   };
+  const home = (it: Item) => boxOf(slots.current[it.id]);
   const inZone = (x: number, y: number) => {
     const b = boxOf(zone.current);
     return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   };
 
-  /** Moves the photo in flight from where it is to `to`, on a slight arc, then calls `done`. */
-  const fly = (to: Box, done: () => void, ms = 460) => {
-    cancelAnimationFrame(frame.current);
-    const from = { ...g.current };
+  /** Puts a photo over the page at `box`. */
+  const launch = (id: string, box: Box) => {
+    cancelAnimationFrame(frames.current[id] ?? 0);
+    boxes.current[id] = { ...box, rot: 0, lift: 0 };
+    setFlying((f) => (f.includes(id) ? f : [...f, id]));
+  };
+  const land = (id: string) => {
+    cancelAnimationFrame(frames.current[id] ?? 0);
+    setFlying((f) => f.filter((x) => x !== id));
+  };
+
+  /** Moves a photo in flight from where it is to `to`, on a slight arc, then calls `done`. */
+  const fly = (id: string, to: Box, ms: number, done: () => void) => {
+    cancelAnimationFrame(frames.current[id] ?? 0);
+    const from = { ...boxes.current[id]! };
     const start = performance.now();
     const step = () => {
       const t = Math.min(1, (performance.now() - start) / ms);
       const e = easeOut(t);
-      g.current = {
+      boxes.current[id] = {
         x: from.x + (to.x - from.x) * e,
         y: from.y + (to.y - from.y) * e - Math.sin(Math.PI * t) * 28,
         w: from.w + (to.w - from.w) * e,
@@ -170,48 +181,60 @@ export default function PriceEvidenceDemo() {
         rot: from.rot * (1 - e),
         lift: from.lift * (1 - e),
       };
-      paint();
-      if (t < 1) frame.current = requestAnimationFrame(step);
+      paint(id);
+      if (t < 1) frames.current[id] = requestAnimationFrame(step);
       else done();
     };
-    frame.current = requestAnimationFrame(step);
+    frames.current[id] = requestAnimationFrame(step);
   };
 
-  const read = (next: Item) => {
+  const show = (next: Item | null) => {
+    current.current = next;
     setItem(next);
-    setGhost(null);
-    setPhase(still ? "listing" : "reading");
     clearTimeout(timer.current);
+    if (!next) return setPhase("idle");
+    setPhase(still ? "listing" : "reading");
     if (!still) timer.current = setTimeout(() => setPhase("listing"), READING_MS);
   };
 
+  /** A photo has reached the card: it's read, and whatever was there is pushed out and flies home. */
+  const place = (next: Item) => {
+    const prev = current.current;
+    if (prev && prev.id !== next.id && !still) {
+      launch(prev.id, boxOf(zone.current));
+      fly(prev.id, home(prev), 520, () => land(prev.id));
+    }
+    show(next);
+    land(next.id);
+  };
+
+  const away = (it: Item) => current.current?.id === it.id || flying.includes(it.id);
+
+  /** A tap or Enter on a photo in the row. */
   const add = (next: Item) => {
-    if (phase !== "idle") return;
-    if (still) return read(next);
-    g.current = { ...boxOf(slots.current[next.id]), rot: 0, lift: 0 };
-    setGhost(next);
-    fly(boxOf(zone.current), () => read(next));
+    if (away(next)) return;
+    if (still) return show(next);
+    launch(next.id, home(next));
+    fly(next.id, boxOf(zone.current), 460, () => place(next));
   };
 
   const reset = () => {
-    if (!item) return;
-    const back = item;
-    clearTimeout(timer.current);
-    setPhase("idle");
-    setItem(null);
+    const prev = current.current;
+    if (!prev) return;
+    show(null);
     if (still) return;
-    g.current = { ...boxOf(zone.current), rot: 0, lift: 0 };
-    setGhost(back);
-    fly(boxOf(slots.current[back.id]), () => setGhost(null), 520);
+    launch(prev.id, boxOf(zone.current));
+    fly(prev.id, home(prev), 520, () => land(prev.id));
   };
 
-  const onDown = (e: ReactPointerEvent<HTMLButtonElement>, next: Item) => {
-    if (phase !== "idle" || e.button !== 0 || still) return;
+  const grab = (e: ReactPointerEvent<HTMLElement>, it: Item, from: "row" | "card") => {
     const r = e.currentTarget.getBoundingClientRect();
     drag.current = {
-      item: next,
-      from: { x: e.clientX, y: e.clientY },
-      grab: { x: e.clientX - r.left, y: e.clientY - r.top },
+      item: it,
+      from,
+      start: { x: e.clientX, y: e.clientY },
+      at: { x: e.clientX, y: e.clientY },
+      grab: { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height },
       moved: false,
       vel: 0,
       last: { x: e.clientX, t: performance.now() },
@@ -219,44 +242,65 @@ export default function PriceEvidenceDemo() {
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
-  const onMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+  const onRowDown = (e: ReactPointerEvent<HTMLButtonElement>, it: Item) => {
+    if (e.button !== 0 || still || away(it)) return;
+    grab(e, it, "row");
+  };
+
+  // The photo in the card can be picked up again: dropped outside, it goes home.
+  const onCardDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const it = current.current;
+    if (!it || e.button !== 0 || still || (e.target as Element).closest("button")) return;
+    grab(e, it, "card");
+  };
+
+  const onMove = (e: ReactPointerEvent<HTMLElement>) => {
     const d = drag.current;
     if (!d) return;
     if (!d.moved) {
-      if (Math.hypot(e.clientX - d.from.x, e.clientY - d.from.y) < 5) return;
+      if (Math.hypot(e.clientX - d.start.x, e.clientY - d.start.y) < 5) return;
       d.moved = true;
-      g.current = { ...boxOf(slots.current[d.item.id]), rot: 0, lift: 0 };
-      setGhost(d.item);
-      // While it's held, it leans into the direction it's moving and settles when it stops.
-      const tilt = () => {
+      const id = d.item.id;
+      if (d.from === "row") launch(id, home(d.item));
+      else {
+        launch(id, boxOf(zone.current));
+        show(null);
+      }
+      // While it's held it shrinks to the size it has in the row, leans into the direction it's
+      // moving and settles when it stops.
+      const size = home(d.item);
+      const hold = () => {
         const cur = drag.current;
-        if (!cur) return;
-        const target = Math.max(-12, Math.min(12, cur.vel * 16));
-        g.current.rot += (target - g.current.rot) * 0.18;
-        g.current.lift += (1 - g.current.lift) * 0.25;
+        const b = boxes.current[id];
+        if (!cur || cur.item.id !== id || !b) return;
+        b.w += (size.w - b.w) * 0.2;
+        b.h += (size.h - b.h) * 0.2;
+        b.x = cur.at.x - cur.grab.x * b.w;
+        b.y = cur.at.y - cur.grab.y * b.h;
+        b.rot += (Math.max(-12, Math.min(12, cur.vel * 16)) - b.rot) * 0.18;
+        b.lift += (1 - b.lift) * 0.25;
         cur.vel *= 0.86;
-        paint();
-        frame.current = requestAnimationFrame(tilt);
+        paint(id);
+        frames.current[id] = requestAnimationFrame(hold);
       };
-      frame.current = requestAnimationFrame(tilt);
+      frames.current[id] = requestAnimationFrame(hold);
     }
     const now = performance.now();
     d.vel = (e.clientX - d.last.x) / Math.max(8, now - d.last.t);
     d.last = { x: e.clientX, t: now };
-    g.current.x = e.clientX - d.grab.x;
-    g.current.y = e.clientY - d.grab.y;
-    paint();
+    d.at = { x: e.clientX, y: e.clientY };
     setOver(inZone(e.clientX, e.clientY));
   };
 
-  const onUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+  const onUp = (e: ReactPointerEvent<HTMLElement>) => {
     const d = drag.current;
     drag.current = null;
     if (!d?.moved) return;
-    skipClick.current = true;
+    if (d.from === "row") skipClick.current = true;
     setOver(false);
-    if (inZone(e.clientX, e.clientY)) fly(boxOf(zone.current), () => read(d.item), 320);
-    else fly(boxOf(slots.current[d.item.id]), () => setGhost(null), 420);
+    const id = d.item.id;
+    if (inZone(e.clientX, e.clientY)) fly(id, boxOf(zone.current), 320, () => place(d.item));
+    else fly(id, home(d.item), 460, () => land(id));
   };
 
   const status =
@@ -273,7 +317,7 @@ export default function PriceEvidenceDemo() {
 
       <div className="flex justify-center gap-3 sm:gap-4" data-slot="mnm-tray">
         {ITEMS.map((it) => {
-          const away = item?.id === it.id || ghost?.id === it.id;
+          const gone = away(it);
           return (
             <div key={it.id} className="flex flex-col items-center gap-1.5">
               <button
@@ -283,23 +327,23 @@ export default function PriceEvidenceDemo() {
                 }}
                 data-item={it.id}
                 aria-label={`Add the photo of the ${it.title}`}
-                disabled={phase !== "idle"}
-                onPointerDown={(e) => onDown(e, it)}
+                aria-disabled={gone || undefined}
+                onPointerDown={(e) => onRowDown(e, it)}
                 onPointerMove={onMove}
                 onPointerUp={onUp}
                 onPointerCancel={onUp}
                 onClick={() => (skipClick.current ? (skipClick.current = false) : add(it))}
                 className="relative size-16 touch-none overflow-hidden rounded-2xl bg-[#f0ebe1] outline-none select-none focus-visible:ring-2 focus-visible:ring-[#141413] focus-visible:ring-offset-2 sm:size-[76px] dark:bg-[#2a2620] dark:focus-visible:ring-[#FAFAF8]"
-                style={{ cursor: phase === "idle" ? "grab" : "default" }}
+                style={{ cursor: gone ? "default" : "grab" }}
               >
                 <img
                   src={it.photo}
                   alt=""
                   draggable={false}
-                  className="size-full object-cover transition-opacity duration-200"
-                  style={{ opacity: away ? 0 : 1 }}
+                  className="size-full object-cover"
+                  style={{ opacity: gone ? 0 : 1 }}
                 />
-                {away ? (
+                {gone ? (
                   <span className="absolute inset-0 rounded-2xl border-[1.5px] border-dashed border-[#d4d4d8] dark:border-[#3f3f46]" />
                 ) : null}
               </button>
@@ -314,11 +358,21 @@ export default function PriceEvidenceDemo() {
           ref={zone}
           data-slot="mnm-zone"
           data-over={over || undefined}
-          className="mnm-zone relative aspect-[4/3] overflow-hidden rounded-2xl sm:aspect-auto sm:h-full"
+          onPointerDown={onCardDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+          className="mnm-zone relative aspect-[4/3] touch-pan-y overflow-hidden rounded-2xl select-none sm:aspect-auto sm:h-full"
+          style={{ cursor: item && phase !== "idle" ? "grab" : undefined }}
         >
           {item && phase !== "idle" ? (
             <>
-              <img src={item.photo} alt={item.alt} className="absolute inset-0 size-full object-cover" />
+              <img
+                src={item.photo}
+                alt={item.alt}
+                draggable={false}
+                className="absolute inset-0 size-full object-cover"
+              />
               {phase === "reading" ? (
                 <>
                   <span className="absolute inset-0 bg-[#141413]/10" />
@@ -332,7 +386,7 @@ export default function PriceEvidenceDemo() {
                   type="button"
                   onClick={reset}
                   data-slot="mnm-reset"
-                  className="mnm-rise absolute bottom-3 left-3 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#141413] shadow-sm backdrop-blur transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                  className="mnm-rise absolute bottom-3 left-3 cursor-pointer rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-[#141413] shadow-sm backdrop-blur transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 >
                   Try another item
                 </button>
@@ -355,7 +409,7 @@ export default function PriceEvidenceDemo() {
         <div className="min-w-0 [--background:#fff] [--border:#E4E4E7] [--foreground:#141413] [--muted-foreground:#71717A] [--muted:#F4F4F5] [--pe-accent:#141413] [--pe-axis:#9a9aa3] [--pe-band:rgba(20,20,19,.05)] [--popover-foreground:#141413] [--popover:#fff] [--ring:#141413] dark:[--background:#141413] dark:[--border:#27272A] dark:[--foreground:#FAFAF8] dark:[--muted-foreground:#A1A1AA] dark:[--muted:#27272A] dark:[--pe-accent:#FAFAF8] dark:[--pe-band:rgba(250,250,248,.07)] dark:[--popover-foreground:#FAFAF8] dark:[--popover:#18181B] dark:[--ring:#FAFAF8]">
           {phase === "listing" && item ? (
             <>
-              <div className="mnm-rise">
+              <div className="mnm-rise" key={item.id}>
                 <p className="truncate text-lg leading-snug font-medium">{item.title}</p>
                 <p className="truncate text-sm text-[#71717A] dark:text-[#A1A1AA]">{item.details}</p>
               </div>
@@ -376,18 +430,26 @@ export default function PriceEvidenceDemo() {
         {status}
       </p>
 
-      {ghost && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={ghostEl}
-              aria-hidden
-              data-slot="mnm-ghost"
-              className="pointer-events-none fixed top-0 left-0 z-[2147483001] overflow-hidden rounded-2xl"
-            >
-              <img src={ghost.photo} alt="" className="size-full object-cover" />
-            </div>,
-            document.body,
-          )
+      {typeof document !== "undefined"
+        ? flying.map((id) => {
+            const it = ITEMS.find((x) => x.id === id)!;
+            return createPortal(
+              <div
+                key={id}
+                ref={(el) => {
+                  els.current[id] = el;
+                  paint(id);
+                }}
+                aria-hidden
+                data-slot="mnm-ghost"
+                className="pointer-events-none fixed top-0 left-0 z-[2147483001] overflow-hidden rounded-2xl"
+              >
+                <img src={it.photo} alt="" className="size-full object-cover" />
+              </div>,
+              document.body,
+              id,
+            );
+          })
         : null}
     </div>
   );
