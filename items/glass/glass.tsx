@@ -126,7 +126,8 @@ export function Glass({
   ...rest
 }: GlassProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const base = useId().replace(/:/g, "");
+  // Only word characters, so the id works inside url(#…) on every React 19 (19.1's ids are «r0»).
+  const base = useId().replace(/[^\w-]/g, "");
   const [maps, setMaps] = useState<Maps | null>(null);
   const [plain, setPlain] = useState(true);
 
@@ -134,9 +135,8 @@ export function Glass({
     const el = ref.current;
     if (!el) return;
     const reduced = window.matchMedia("(prefers-reduced-transparency: reduce)");
-    if (!chromium() || reduced.matches) return setPlain(true);
-    setPlain(false);
     let frame = 0;
+    let ro: ResizeObserver | undefined;
     const build = () => {
       // Layout size, not the on-screen one: the filter works in the element's own CSS pixels.
       const w = el.offsetWidth;
@@ -146,13 +146,24 @@ export function Glass({
       // A new id per size, so a browser that caches filters by id picks the new one up.
       setMaps({ id: `glass-${base}-${++serial}`, w, h, map, rim });
     };
-    const ro = new ResizeObserver(() => {
+    // Also runs when the viewer changes the transparency setting while the page is open.
+    const sync = () => {
+      ro?.disconnect();
+      ro = undefined;
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(build);
-    });
-    ro.observe(el);
+      if (!chromium() || reduced.matches) return setPlain(true);
+      setPlain(false);
+      ro = new ResizeObserver(() => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(build);
+      });
+      ro.observe(el);
+    };
+    sync();
+    reduced.addEventListener("change", sync);
     return () => {
-      ro.disconnect();
+      reduced.removeEventListener("change", sync);
+      ro?.disconnect();
       cancelAnimationFrame(frame);
     };
   }, [base, radius, bezel, specular, highlight]);

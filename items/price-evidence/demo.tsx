@@ -2,7 +2,7 @@ import "@fontsource-variable/rubik";
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Shader, shaderBackground } from "@danolekh/cardstock/shader";
-import { Glass } from "./glass";
+import { Glass } from "../glass/glass";
 import { PriceEvidence, type Sale } from "./price-evidence";
 
 /* The concept, in Minimist's style: a charity shop drops in a photo of a donated item and gets the

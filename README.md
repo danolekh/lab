@@ -5,6 +5,7 @@ with the shadcn CLI. Live at [danolekh.com/lab](https://www.danolekh.com/lab).
 
 | | For | Install |
 | --- | --- | --- |
+| [Liquid Glass](items/glass) | after [Aave's write-up](https://aave.com/design/building-glass-for-the-web) | `npx shadcn@latest add https://www.danolekh.com/r/glass.json` |
 | [Where the price comes from](items/price-evidence) | Minimist | `npx shadcn@latest add https://www.danolekh.com/r/price-evidence.json` |
 
 The parts are written against shadcn's tokens (`--foreground`, `--muted-foreground`, `--popover`,
